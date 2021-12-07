@@ -39,6 +39,9 @@ The ESP32 will read different parameters of the device based on the set priority
 4. DRY RUN: The ESP32 will monitor and report if the motor is in Dry Run state i.e motor is operating without a Load.
 
 All the data of these tasks will be fetched and pushed to a topic on AWS over MQTT with UNIX Timestamp. In case of no internet connection, data will be stored locally on the SD Card module with a UNIX timestamp and will be synced with the cloud once internet connection is restored.
+The only time this will be pushed is when there's a fault with one of the aforementioned parameters. Otherwise, it will be monitored locally only. In case if multiple fault events are reported when there's no internet connection but the status was fine when the internet came back, there is no need to upload the locally stored statuses.
+
+Note: SD Card is for a future implementation.
 
 ##### Schedule Download and Store Task
 
