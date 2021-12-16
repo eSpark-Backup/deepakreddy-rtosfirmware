@@ -1,0 +1,19 @@
+{
+	"Schedule": [{
+			"Channel ID": 100,
+			"Day": "Monday",
+			"Start Time(epoch)": 1625000013,
+			"Duration(minutes)": 5,
+			"ConfigON": 1121,
+			"ConfigOFF": 1020
+		},
+		{
+			"Channel ID": 100,
+			"Day": "Tuesday",
+			"Start Time(epoch)": 1625203013,
+			"Duration(minutes)": 60,
+			"ConfigON": 1121,
+			"ConfigOFF": 1020
+		}
+	]
+}

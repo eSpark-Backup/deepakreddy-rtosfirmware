@@ -12,6 +12,8 @@
 #include "esp_sntp.h"
 #include "string.h"
 #include "stdlib.h"
+#include "cJSON.h"
+#include "esp_spiffs.h"
 
 
 #define led_pin GPIO_NUM_2
@@ -220,7 +222,7 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
         case HTTP_EVENT_ON_FINISH:
             ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
             output_len = 0;
-            printf("%s\n", (char *)evt->user_data);
+
             break;
         case HTTP_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
@@ -230,14 +232,275 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
+int getToday(char* today)
+{
+	int w_day = 0;
+	if(strncmp(today, "Monday", 6))
+	{
+		w_day = 1;
+	}else if(strncmp(today, "Tuesday", 7))
+	{
+		w_day = 2;
+	}
+
+	return w_day;
+}
+
+void getSchedule(double* epoch, int * dur, int w_day)
+{
+    esp_vfs_spiffs_conf_t conf = {
+      .base_path = "/spiffs",
+      .partition_label = NULL,
+      .max_files = 5,
+      .format_if_mount_failed = true
+    };
+
+    // Use settings defined above to initialize and mount SPIFFS filesystem.
+    // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+
+    ESP_LOGI(TAG, "Reading file");
+    FILE* f = fopen("/spiffs/schedule.txt", "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for reading");
+        return;
+    }
+
+    char line[2000];
+	fread(line, sizeof(line), 1, f);
+
+
+    fclose(f);
+
+
+    //ESP_LOGI(TAG, "Read from file: '%s'", line);
+
+    // All done, unmount partition and disable SPIFFS
+    esp_vfs_spiffs_unregister(conf.partition_label);
+    ESP_LOGI(TAG, "SPIFFS unmounted");
+
+    cJSON* parse_json = cJSON_Parse(line);
+
+    if (parse_json == NULL)
+    {
+    	printf("Error parse_json\n");
+    }
+
+    cJSON* schedule = cJSON_GetObjectItem(parse_json, "Schedule");
+
+    int array_size = cJSON_GetArraySize(schedule);
+    printf("array size %d\n", array_size);
+
+    for(int i = 0; i < array_size; i++)
+    {
+    	cJSON* array = cJSON_GetArrayItem(schedule, i);
+        if (array == NULL)
+        {
+        	printf("Error array\n");
+        }
+
+    	cJSON* day = cJSON_GetObjectItem(array, "Day");
+        if (day == NULL)
+        {
+        	printf("Error day\n");
+        }
+
+        char* today = day->valuestring;
+    	printf("Day %s\n", today);
+    	if(getToday(today) == 1)
+    	{
+    		*epoch = (cJSON_GetObjectItem(array, "Start Time(epoch)")->valuedouble);
+    		*dur = cJSON_GetObjectItem(array, "Duration(minutes)")->valueint;
+
+    		break;
+    	}
+    }
+}
+
+void storeToSPIFFS(char* string)
+{
+    ESP_LOGI(TAG, "Initializing SPIFFS");
+
+    esp_vfs_spiffs_conf_t conf = {
+      .base_path = "/spiffs",
+      .partition_label = NULL,
+      .max_files = 5,
+      .format_if_mount_failed = true
+    };
+
+    // Use settings defined above to initialize and mount SPIFFS filesystem.
+    // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+
+    // Use POSIX and C standard library functions to work with files.
+    // First create a file.
+    ESP_LOGI(TAG, "Opening file");
+    FILE* f = fopen("/spiffs/schedule.txt", "w");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for writing");
+        return;
+    }
+
+    fprintf(f, string);
+    fclose(f);
+    ESP_LOGI(TAG, "File written");
+
+    unsigned long epoch = 0;
+
+
+//    // Open schedule.txt file for reading
+//    ESP_LOGI(TAG, "Reading file");
+//    f = fopen("/spiffs/schedule.txt", "r");
+//    if (f == NULL) {
+//        ESP_LOGE(TAG, "Failed to open file for reading");
+//        return;
+//    }
+//
+//    char line[2000];
+//	fread(line, sizeof(line), 1, f);
+//
+//
+//    fclose(f);
+//
+//    ESP_LOGI(TAG, "Read from file: '%s'", line);
+//
+    // All done, unmount partition and disable SPIFFS
+    esp_vfs_spiffs_unregister(conf.partition_label);
+    ESP_LOGI(TAG, "SPIFFS unmounted");
+//
+//    cJSON* parse_json = cJSON_Parse(line);
+//
+//    if (parse_json == NULL)
+//    {
+//    	printf("Error parse_json\n");
+//    }
+//
+//    cJSON* schedule = cJSON_GetObjectItem(parse_json, "Schedule");
+//
+//    int array_size = cJSON_GetArraySize(schedule);
+//    printf("array size %d\n", array_size);
+//
+//    for(int i = 0; i < array_size; i++)
+//    {
+//    	cJSON* array = cJSON_GetArrayItem(schedule, i);
+//        if (array == NULL)
+//        {
+//        	printf("Error array\n");
+//        }
+//
+//    	cJSON* day = cJSON_GetObjectItem(array, "Day");
+//        if (day == NULL)
+//        {
+//        	printf("Error day\n");
+//        }
+//
+//    	printf("Day %s\n", day->valuestring);
+//    }
+
+//    cJSON* schedule = cJSON_GetObjectItem(parse_json, "Schedule");
+//    if (schedule == NULL)
+//    {
+//    	printf("Error in schedule JSON\n");
+//    }
+//
+//    cJSON* schedule1 = cJSON_GetObjectItem(schedule, "Schdule01");
+//    if (schedule1 == NULL)
+//    {
+//    	printf("Error in schedule1 JSON\n");
+//    }
+//
+//    cJSON* day = cJSON_GetObjectItem(schedule1, "Day");
+//    if (day == NULL)
+//    {
+//    	printf("Error in Day JSON\n");
+//    }
+//
+//    printf("Day: %s\n", day->valuestring);
+
+
+//    cJSON* childJSON = NULL;
+//    cJSON* schedule1 = NULL;
+//    cJSON* schedule1_child = NULL;
+//    cJSON* schedule1_day = NULL;
+//
+//    childJSON = schedule->child;
+//    if (childJSON == NULL)
+//    {
+//        const char *error_ptr = cJSON_GetErrorPtr();
+//        if (error_ptr != NULL)
+//        {
+//            printf("Error: %s\n", error_ptr);
+//        }
+//    }
+//
+//    schedule1 = cJSON_GetObjectItem(childJSON,"Schdule01");
+//    if (schedule1 == NULL)
+//    {
+//        const char *error_ptr = cJSON_GetErrorPtr();
+//        if (error_ptr != NULL)
+//        {
+//            printf("Error: %s\n", error_ptr);
+//        }
+//    }
+//
+//    schedule1_child = schedule1->child;
+//    if (schedule1_child == NULL)
+//    {
+//        const char *error_ptr = cJSON_GetErrorPtr();
+//        if (error_ptr != NULL)
+//        {
+//            printf("Error: %s\n", error_ptr);
+//        }
+//    }
+//
+//    schedule1_day = cJSON_GetObjectItem(schedule1_child, "Day");
+//    if (schedule1_day == NULL)
+//    {
+//        const char *error_ptr = cJSON_GetErrorPtr();
+//        if (error_ptr != NULL)
+//        {
+//            printf("Error: %s\n", error_ptr);
+//        }
+//    }
+//
+//    printf("Parsed string %s\n", schedule1_day->valuestring);
+
+
+
+
+
+}
+
 void getJSON()
 {
 	while(1)
 	{
-	    static char local_response_buffer[2000] = {0};
+	    char local_response_buffer[2000] = {0};
 
 	    esp_http_client_config_t config = {
-	        .url = "https://esp-idf-bucket.s3.us-west-1.amazonaws.com/hello.txt",
+	        .url = "https://esp-idf-bucket.s3.us-west-1.amazonaws.com/schedule.json",
 	        .event_handler = _http_event_handle,
 	        .cert_pem = ca_cert_pem_start,
 			.method = HTTP_METHOD_GET,
@@ -259,9 +522,11 @@ void getJSON()
 				   content_len);
 
 
+		   storeToSPIFFS(local_response_buffer);
+
 
 		   printf("Response\n");
-		   printf("%s\n", local_response_buffer);
+		   //printf("%s\n", local_response_buffer);
 
 		   for(int i = 0; i < 2000; i++)
 		   {
@@ -292,19 +557,29 @@ void getTime()
 	    // update 'now' variable with current time
 	    time(&now);
 
-	    ESP_LOGI(TAG, "Year = %d, Month = %d, Day = %d", timeinfo.tm_year, timeinfo.tm_mon, timeinfo.tm_mday);
+	    ESP_LOGI(TAG, "Year = %d, Month = %d, Day = %d", timeinfo.tm_year, timeinfo.tm_mon, timeinfo.tm_wday);
+
+	    int w_day = timeinfo.tm_wday;
 
 	    // Set timezone and print local time
-	    setenv("TZ", "UTC-5", 1);
-	    tzset();
-	    localtime_r(&now, &timeinfo);
-	    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-	    ESP_LOGI(TAG, "The current date/time in Pakistan is: %s", strftime_buf);
+//	    setenv("TZ", "UTC-5", 1);
+//	    tzset();
+//	    localtime_r(&now, &timeinfo);
+//	    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+//	    ESP_LOGI(TAG, "The current date/time in Pakistan is: %s", strftime_buf);
 
 		vTaskDelay(10000 / portTICK_PERIOD_MS);
+
+
+		double epoch = 0;
+		int dur = 0;
+	    getSchedule(&epoch, &dur, w_day);
+
+	    printf("Epoch: %lf, Dur: %d", epoch, dur);
 	}
 
 }
+
 
 static void obtain_time(void)
 {
@@ -383,14 +658,14 @@ void app_main(void)
                 NULL,         // Task handle
                 app_cpu);     // Run on one core for demo purposes (ESP32 only)
 
-    /*xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
+    xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
     		     getTime,  // Function to be called
                 "Get Time",   // Name of task
-                1024 * 2,         // Stack size (bytes in ESP32, words in FreeRTOS)
+                1024 * 4,         // Stack size (bytes in ESP32, words in FreeRTOS)
                 NULL,         // Parameter to pass to function
                 0,            // Task priority (0 to configMAX_PRIORITIES - 1)
                 NULL,         // Task handle
-                app_cpu);     // Run on one core for demo purposes (ESP32 only)*/
+                app_cpu);     // Run on one core for demo purposes (ESP32 only)
 
     // Task to run forever
 //    xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
