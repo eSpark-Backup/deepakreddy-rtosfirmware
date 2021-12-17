@@ -34,8 +34,8 @@
 		{
 			"Channel ID": 100,
 			"Day": "Friday",
-			"Start Time(epoch)": 1625203017,
-			"Duration(minutes)": 64,
+			"Start Time(epoch)": 1639749360,
+			"Duration(minutes)": 5,
 			"ConfigON": 1121,
 			"ConfigOFF": 1020
 		},

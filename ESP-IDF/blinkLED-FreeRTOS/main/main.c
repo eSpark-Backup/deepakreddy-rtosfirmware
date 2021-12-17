@@ -16,7 +16,9 @@
 #include "esp_spiffs.h"
 
 
-#define led_pin GPIO_NUM_2
+#define led_pin GPIO_NUM_4
+#define Relay1 5
+#define Relay2 2
 
 static const int rate_1 = 500;  // ms
 static const int rate_2 = 323;  // ms
@@ -38,8 +40,8 @@ static const char *TAG = "wifi station";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-#define EXAMPLE_ESP_WIFI_SSID      "DevSol Pakistan"
-#define EXAMPLE_ESP_WIFI_PASS      "47356880"
+#define EXAMPLE_ESP_WIFI_SSID      "KALBEABBAS 1096"
+#define EXAMPLE_ESP_WIFI_PASS      "UsmaneSpark"
 #define EXAMPLE_ESP_MAXIMUM_RETRY  5
 
 static int s_retry_num = 0;
@@ -624,8 +626,14 @@ void executeSchedule()
 		if((now >= epoch) && (now < (epoch + dur * 60)))
 		{
 			printf("\nActuate relays\n");
+
+	        gpio_set_level(Relay1, 1);
+	        gpio_set_level(Relay2, 1);
 		}else{
 			printf("\nOut of schedule\n");
+
+	        gpio_set_level(Relay1, 0);
+	        gpio_set_level(Relay2, 0);
 		}
 
 		vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -693,6 +701,12 @@ void app_main(void)
     xSemaphoreGive(xSemaphore);
 
 
+    gpio_reset_pin(Relay1);
+    gpio_reset_pin(Relay2);
+
+    gpio_set_direction(Relay1, GPIO_MODE_OUTPUT);
+    gpio_set_direction(Relay2, GPIO_MODE_OUTPUT);
+
     // Task to run forever
     xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
                 toggleLED_1,  // Function to be called
@@ -724,7 +738,7 @@ void app_main(void)
     xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
     		     executeSchedule,  // Function to be called
                 "ExecuteSchedule",   // Name of task
-                1024 *2,         // Stack size (bytes in ESP32, words in FreeRTOS)
+                1024 * 2,         // Stack size (bytes in ESP32, words in FreeRTOS)
                 NULL,         // Parameter to pass to function
                 0,            // Task priority (0 to configMAX_PRIORITIES - 1)
                 NULL,         // Task handle
