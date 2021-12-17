@@ -46,6 +46,11 @@ static int s_retry_num = 0;
 extern const char ca_cert_pem_start[] asm("_binary_ca_cert_pem_start");
 extern const char ca_cert_pem_end[]   asm("_binary_ca_cert_pem_end");
 
+SemaphoreHandle_t xSemaphore = NULL;
+
+double epoch = 0;
+int dur = 0;
+
 
 static void obtain_time(void);
 static void initialize_sntp(void);
@@ -235,12 +240,29 @@ esp_err_t _http_event_handle(esp_http_client_event_t *evt)
 int getToday(char* today)
 {
 	int w_day = 0;
-	if(strncmp(today, "Monday", 6))
+	if(strncmp(today, "Monday", 6) == 0)
 	{
 		w_day = 1;
-	}else if(strncmp(today, "Tuesday", 7))
+	}else if(strncmp(today, "Tuesday", 7) == 0)
 	{
 		w_day = 2;
+	}else if(strncmp(today, "Wednesday", 9) == 0)
+	{
+		w_day = 3;
+	}else if(strncmp(today, "Thursday", 8) == 0)
+	{
+		w_day = 4;
+	}else if(strncmp(today, "Friday", 6) == 0)
+	{
+		w_day = 5;
+	}else if(strncmp(today, "Saturday", 8) == 0)
+	{
+		w_day = 6;
+	}else if(strncmp(today, "Sunday", 6) == 0)
+	{
+		w_day = 0;
+	}else{
+		w_day = -1;
 	}
 
 	return w_day;
@@ -284,7 +306,7 @@ void getSchedule(double* epoch, int * dur, int w_day)
     fclose(f);
 
 
-    //ESP_LOGI(TAG, "Read from file: '%s'", line);
+    ESP_LOGI(TAG, "Read from file: '%s'", line);
 
     // All done, unmount partition and disable SPIFFS
     esp_vfs_spiffs_unregister(conf.partition_label);
@@ -318,7 +340,7 @@ void getSchedule(double* epoch, int * dur, int w_day)
 
         char* today = day->valuestring;
     	printf("Day %s\n", today);
-    	if(getToday(today) == 1)
+    	if(getToday(today) == w_day)
     	{
     		*epoch = (cJSON_GetObjectItem(array, "Start Time(epoch)")->valuedouble);
     		*dur = cJSON_GetObjectItem(array, "Duration(minutes)")->valueint;
@@ -366,8 +388,6 @@ void storeToSPIFFS(char* string)
     fprintf(f, string);
     fclose(f);
     ESP_LOGI(TAG, "File written");
-
-    unsigned long epoch = 0;
 
 
 //    // Open schedule.txt file for reading
@@ -497,46 +517,54 @@ void getJSON()
 {
 	while(1)
 	{
-	    char local_response_buffer[2000] = {0};
+		if(xSemaphore != NULL)
+		{
+			if(xSemaphoreTake(xSemaphore, (TickType_t) (10000 / portTICK_PERIOD_MS)) == pdTRUE)
+			{
+				char local_response_buffer[2000] = {0};
 
-	    esp_http_client_config_t config = {
-	        .url = "https://esp-idf-bucket.s3.us-west-1.amazonaws.com/schedule.json",
-	        .event_handler = _http_event_handle,
-	        .cert_pem = ca_cert_pem_start,
-			.method = HTTP_METHOD_GET,
-			.user_data = local_response_buffer,
-			.buffer_size = 1024,
-	    };
+				esp_http_client_config_t config = {
+					.url = "https://esp-idf-bucket.s3.us-west-1.amazonaws.com/schedule.json",
+					.event_handler = _http_event_handle,
+					.cert_pem = ca_cert_pem_start,
+					.method = HTTP_METHOD_GET,
+					.user_data = local_response_buffer,
+					.buffer_size = 1024,
+				};
 
-		esp_http_client_handle_t client = esp_http_client_init(&config);
-	    //esp_err_t err = esp_http_client_open(client, 0);
+				esp_http_client_handle_t client = esp_http_client_init(&config);
+				//esp_err_t err = esp_http_client_open(client, 0);
 
-		esp_err_t err = esp_http_client_perform(client);
+				esp_err_t err = esp_http_client_perform(client);
 
-		if (err == ESP_OK) {
+				if (err == ESP_OK) {
 
-			int content_len = esp_http_client_get_content_length(client);
+					int content_len = esp_http_client_get_content_length(client);
 
-		   ESP_LOGI(TAG, "Status = %d, content_length = %d",
-				   esp_http_client_get_status_code(client),
-				   content_len);
-
-
-		   storeToSPIFFS(local_response_buffer);
+				   ESP_LOGI(TAG, "Status = %d, content_length = %d",
+						   esp_http_client_get_status_code(client),
+						   content_len);
 
 
-		   printf("Response\n");
-		   //printf("%s\n", local_response_buffer);
+				   storeToSPIFFS(local_response_buffer);
 
-		   for(int i = 0; i < 2000; i++)
-		   {
-			   local_response_buffer[i] = 0;
-		   }
 
+				   printf("Response\n");
+				   //printf("%s\n", local_response_buffer);
+
+				   for(int i = 0; i < 2000; i++)
+				   {
+					   local_response_buffer[i] = 0;
+				   }
+
+				}
+				esp_http_client_cleanup(client);
+
+				xSemaphoreGive(xSemaphore);
+
+				vTaskDelay(10000 / portTICK_PERIOD_MS);
+			}
 		}
-		esp_http_client_cleanup(client);
-
-		vTaskDelay(5000 / portTICK_PERIOD_MS);
 	}
 
 }
@@ -545,39 +573,63 @@ void getTime()
 {
 	while(1)
 	{
-	    char strftime_buf[64];
+		if(xSemaphore != NULL)
+		{
+			if(xSemaphoreTake(xSemaphore, (TickType_t)(10000 / portTICK_PERIOD_MS)) == pdTRUE)
+			{
+				//char strftime_buf[64];
 
-		printf("Update Time\n");
-	    time_t now;
-	    struct tm timeinfo;
-	    time(&now);
-	    localtime_r(&now, &timeinfo);
+				printf("Update Time\n");
+				time_t now;
+				struct tm timeinfo;
+				time(&now);
+				localtime_r(&now, &timeinfo);
 
-	    obtain_time();
-	    // update 'now' variable with current time
-	    time(&now);
+				obtain_time();
+				// update 'now' variable with current time
+				time(&now);
 
-	    ESP_LOGI(TAG, "Year = %d, Month = %d, Day = %d", timeinfo.tm_year, timeinfo.tm_mon, timeinfo.tm_wday);
+				ESP_LOGI(TAG, "Year = %d, Month = %d, Day = %d", timeinfo.tm_year, timeinfo.tm_mon, timeinfo.tm_wday);
+				ESP_LOGI(TAG, "EPOCH = %ld", now);
 
-	    int w_day = timeinfo.tm_wday;
+				int w_day = timeinfo.tm_wday;
 
-	    // Set timezone and print local time
-//	    setenv("TZ", "UTC-5", 1);
-//	    tzset();
-//	    localtime_r(&now, &timeinfo);
-//	    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-//	    ESP_LOGI(TAG, "The current date/time in Pakistan is: %s", strftime_buf);
+				// Set timezone and print local time
+		//	    setenv("TZ", "UTC-5", 1);
+		//	    tzset();
+		//	    localtime_r(&now, &timeinfo);
+		//	    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+		//	    ESP_LOGI(TAG, "The current date/time in Pakistan is: %s", strftime_buf);
 
-		vTaskDelay(10000 / portTICK_PERIOD_MS);
+				getSchedule(&epoch, &dur, w_day);
 
+				xSemaphoreGive(xSemaphore);
 
-		double epoch = 0;
-		int dur = 0;
-	    getSchedule(&epoch, &dur, w_day);
-
-	    printf("Epoch: %lf, Dur: %d", epoch, dur);
+				vTaskDelay(10000 / portTICK_PERIOD_MS);
+			}
+		}
 	}
 
+}
+
+void executeSchedule()
+{
+	while(1)
+	{
+		time_t now;
+		time(&now);
+
+		printf("Epoch: %lf, Dur: %d", epoch, dur);
+
+		if((now >= epoch) && (now < (epoch + dur * 60)))
+		{
+			printf("\nActuate relays\n");
+		}else{
+			printf("\nOut of schedule\n");
+		}
+
+		vTaskDelay(1000 / portTICK_PERIOD_MS);
+	}
 }
 
 
@@ -596,10 +648,10 @@ static void obtain_time(void)
     time_t now = 0;
     struct tm timeinfo = { 0 };
     int retry = 0;
-    const int retry_count = 10;
+    const int retry_count = 3;
     while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count) {
         ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
     time(&now);
     localtime_r(&now, &timeinfo);
@@ -628,7 +680,6 @@ void app_main(void)
 {
     nvs_flash_init();
 
-
     wifi_init_sta();
 
     esp_netif_init();
@@ -637,6 +688,9 @@ void app_main(void)
 
     gpio_set_direction(led_pin, GPIO_MODE_OUTPUT);
 
+    xSemaphore = xSemaphoreCreateBinary();
+
+    xSemaphoreGive(xSemaphore);
 
 
     // Task to run forever
@@ -651,7 +705,7 @@ void app_main(void)
 
     xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
     		     getJSON,  // Function to be called
-                "Get Response",   // Name of task
+                "Get Schedule",   // Name of task
                 1024 * 10,         // Stack size (bytes in ESP32, words in FreeRTOS)
                 NULL,         // Parameter to pass to function
                 0,            // Task priority (0 to configMAX_PRIORITIES - 1)
@@ -662,6 +716,15 @@ void app_main(void)
     		     getTime,  // Function to be called
                 "Get Time",   // Name of task
                 1024 * 4,         // Stack size (bytes in ESP32, words in FreeRTOS)
+                NULL,         // Parameter to pass to function
+                0,            // Task priority (0 to configMAX_PRIORITIES - 1)
+                NULL,         // Task handle
+                app_cpu);     // Run on one core for demo purposes (ESP32 only)
+
+    xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
+    		     executeSchedule,  // Function to be called
+                "ExecuteSchedule",   // Name of task
+                1024 *2,         // Stack size (bytes in ESP32, words in FreeRTOS)
                 NULL,         // Parameter to pass to function
                 0,            // Task priority (0 to configMAX_PRIORITIES - 1)
                 NULL,         // Task handle
